@@ -96,6 +96,10 @@ class TsBlock:
             return block
 
     def get_current(self, start=None, end=None, freq='d'):
+        current = self.__current.loc[freq]
+        if current.isna().any:
+            pass
+        self.__current.loc[freq] = current
         return self.__current.loc[freq]
 
     @staticmethod
@@ -139,8 +143,8 @@ class TsBlock:
         df1 = df.diff()
         df2 = df.diff(-1)
 
-        # 需要删除的高低点，连续高低点中的较低高点和较高低点
-        index = [df1['high'] < 0, df2['high'] < 0, df1['low'] > 0, df2['low'] > 0]
+        # 需要删除的高低点，连续高低点中的较低高点和较高低点,相等的情况，删除后面的点
+        index = [df1['high'] <= 0, df2['high'] < 0, df1['low'] >= 0, df2['low'] > 0]
         flag = [x.any() for x in index]
 
         if not (flag[0] or flag[1] or flag[2] or flag[3]):
@@ -255,7 +259,7 @@ class TsBlock:
         df = block_df.copy(deep=True)
         df['block_flag'] = '-'
         df['block_hl_flag'] = '-'
-        df['top_bottom_flag'] = '-'
+        # df['top_bottom_flag'] = '-'
 
         for row in block_relation_df.itertuples():
             current_dt = row.Index
@@ -279,14 +283,14 @@ class TsBlock:
             elif row.block_highest < 0 and row.block_lowest > 0:
                 block_hl_flag = 'included'
 
-            df.block_flag[current_dt] = block_flag
-            df.block_hl_flag[current_dt] = block_hl_flag
+            df.loc[current_dt, 'block_flag'] = block_flag
+            df.loc[current_dt, 'block_hl_flag'] = block_hl_flag
 
             if df.segment_num[current_dt] % 2 == 0:
                 if block_flag == 'up':
-                    df.top_bottom_flag[current_dt] = 'top'
+                    df.loc[current_dt, 'block_flag'] = 'top'
                 elif block_flag == 'down':
-                    df.top_bottom_flag[current_dt] = 'bottom'
+                    df.loc[current_dt, 'block_flag'] = 'bottom'
 
         return df
 
@@ -355,8 +359,8 @@ if __name__ == "__main__":
     from tsBlock import TsBlock
     import pandas as pd
     block = TsBlock("SRL9")
-    # segment = block.get_segments()
-    # df = pd.concat(segment, axis=1, join='outer').fillna(0)
+    segment = block.get_segments()
+    df = pd.concat(segment, axis=1, join='outer').fillna(0)
     # df.tail(50)
 
     block_df = block.get_blocks()
