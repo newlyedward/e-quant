@@ -83,17 +83,16 @@ class TsBlock:
             if start and end:
                 return block[start:end]
             elif start:
-                return [segment[0][start:end], segment[1][start:end]]
+                return block[start:]
             elif end:
-                return [segment[0][start:end], segment[1][start:end]]
+                return block[0]
             else:
-                return segment
+                return block
         else:
             higher, lower = self.get_segments(start=start, end=end, freq=freq)
             block = self.__block_identify(higher, lower)
             self.__blocks[freq] = block
             return block
-
 
     def get_current(self, start=None, end=None, freq='d'):
         return self.__current.loc[freq]
@@ -109,7 +108,7 @@ class TsBlock:
         """
         from pytdx.reader import TdxExHqDailyBarReader
         reader = TdxExHqDailyBarReader()
-        df = reader.get_df(r"H:\TDX\vipdoc\ds\lday\28#SRL9.day")
+        df = reader.get_df(r"D:\Trade\TDX\vipdoc\ds\lday\28#SRL9.day")
 
         return df.loc[:, ['high', 'low']]
 
@@ -236,6 +235,18 @@ class TsBlock:
                         block_low = max(block_low, row.low)
                 end_dt = current_dt
                 current_dt = row.Index
+
+        # record last block
+        start_index = gd_df.index.get_loc(start_dt) + 1
+        end_index = gd_df.index.get_loc(current_dt)
+        block_highest = gd_df.high[start_index: end_index].max()
+        block_lowest = gd_df.low[start_index: end_index].min()
+
+        insert_row = pd.DataFrame([[start_dt, current_dt, block_high, block_low, block_highest,
+                                    block_lowest, segment_num]],
+                                  columns=['start_dt', 'end_dt', 'block_high', 'block_low',
+                                           'block_highest', 'block_lowest', 'segment_num'])
+        block_df = block_df.append(insert_row, ignore_index=True)
         return block_df.set_index('start_dt')
 
     def __block_relation(self, block_df):
@@ -343,6 +354,8 @@ if __name__ == "__main__":
     from tsBlock import TsBlock
     import pandas as pd
     block = TsBlock("SRL9")
-    segment = block.get_segments()
-    df = pd.concat(segment, axis=1, join='outer').fillna(0)
-    df.tail(50)
+    # segment = block.get_segments()
+    # df = pd.concat(segment, axis=1, join='outer').fillna(0)
+    # df.tail(50)
+
+    block_df = block.get_blocks()
