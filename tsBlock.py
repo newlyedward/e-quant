@@ -1,8 +1,8 @@
 # --coding:utf-8
-import numpy as np
-import pandas as pd
-import scipy.signal as signal
 from datetime import datetime, timedelta
+import pandas as pd
+import numpy as np
+import scipy.signal as signal
 
 FREQ = ('5m', '30m', 'd', 'w')
 
@@ -13,8 +13,7 @@ class TsBlock:
         self.instrument_name = name
         self.__extremes = dict.fromkeys(FREQ)
         self.__segments = dict.fromkeys(FREQ)
-        self.__blocks = dict.fromkeys(FREQ)
-        self.__current = pd.DataFrame(index=FREQ, columns=['trend', 'No.', 'block_status', 'segment_num'])
+        self.__blocks = dict.fromkeys(FREQ, pd.DataFrame())
 
     def get_extremes(self, start=None, end=None, freq='d'):
         """
@@ -79,7 +78,13 @@ class TsBlock:
 
         block = self.__blocks[freq]
 
-        if block:
+        if block.empty:
+            higher, lower = self.get_segments(start=start, end=end, freq=freq)
+            block = self.__block_identify(higher, lower)
+            block = self.__block_relation(block)
+            self.__blocks[freq] = block
+            return block
+        else:
             if start and end:
                 return block[start:end]
             elif start:
@@ -88,19 +93,12 @@ class TsBlock:
                 return block[0]
             else:
                 return block
-        else:
-            higher, lower = self.get_segments(start=start, end=end, freq=freq)
-            block = self.__block_identify(higher, lower)
-            block = self.__block_relation(block)
-            self.__blocks[freq] = block
-            return block
 
-    def get_current(self, start=None, end=None, freq='d'):
-        current = self.__current.loc[freq]
-        if current.isna().any:
-            pass
-        self.__current.loc[freq] = current
-        return self.__current.loc[freq]
+
+    def get_current_status(self, start=None, end=None, freq='d'):
+        block_df = self.get_blocks(start=None, end=None, freq=freq)
+        dt = block_df.loc[block_df['No.'] == 0, ['block_flag', 'No.', 'segment_num', 'block_hl_flag']].tail(2).index[0]
+        return block_df.loc[dt:]
 
     @staticmethod
     def get_history_hq(start=None, end=None, freq='d'):
@@ -138,10 +136,10 @@ class TsBlock:
         :param lower:  pd.Series, index is datetime
         :return: [pd.Series, pd.Series]
         """
-        df = pd.concat([higher, lower], axis=1, join='outer')
+        hl_df = pd.concat([higher, lower], axis=1, join='outer')
         # 比较前后高低点
-        df1 = df.diff()
-        df2 = df.diff(-1)
+        df1 = hl_df.diff()
+        df2 = hl_df.diff(-1)
 
         # 需要删除的高低点，连续高低点中的较低高点和较高低点,相等的情况，删除后面的点
         index = [df1['high'] <= 0, df2['high'] < 0, df1['low'] >= 0, df2['low'] > 0]
@@ -154,17 +152,17 @@ class TsBlock:
 
         # 删除无效的高低点
         if flag[0]:
-            df.loc[index[0], 'high'] = np.nan  # 向后删除较低高点
+            hl_df.loc[index[0], 'high'] = np.nan  # 向后删除较低高点
         if flag[1]:
-            df.loc[index[1], 'high'] = np.nan  # 向前删除较低高点
+            hl_df.loc[index[1], 'high'] = np.nan  # 向前删除较低高点
         if flag[2]:
-            df.loc[index[2], 'low'] = np.nan
+            hl_df.loc[index[2], 'low'] = np.nan
         if flag[3]:
-            df.loc[index[3], 'low'] = np.nan
+            hl_df.loc[index[3], 'low'] = np.nan
         if flag[0] or flag[1]:
-            higher = df['high'].dropna()
+            higher = hl_df['high'].dropna()
         if flag[2] or flag[3]:
-            lower = df['low'].dropna()
+            lower = hl_df['low'].dropna()
 
         # 合并高低点后再处理一次
         return TsBlock.__segment(higher, lower)
@@ -173,13 +171,13 @@ class TsBlock:
     def __block_identify(higher, lower):
         # 后向寻找Block
         gd_df = pd.concat([higher, lower], axis=1, join='outer')
-        df = gd_df.fillna(0)
+        hl_df = gd_df.fillna(0)
 
         # init current block
         block_high = higher[0]
         block_low = lower[0]
-        start_dt = df.index[0]
-        end_dt = df.index[1]
+        start_dt = hl_df.index[0]
+        end_dt = hl_df.index[1]
         segment_num = 1
         current_dt = start_dt
         # 初始化block表
@@ -187,7 +185,7 @@ class TsBlock:
             columns=['start_dt', 'end_dt', 'block_high', 'block_low', 'block_highest', 'block_lowest',
                      'segment_num'])
 
-        for row in df[2:].itertuples():
+        for row in hl_df[2:].itertuples():
             # print(row.Index)
             # print([current_dt, start_dt, end_dt, block_high,block_low,block_highest, block_lowest,segment_num])
             if segment_num < 2:  # 一上一下2根线段必定有交集,不需要判断是否是新的block
@@ -254,12 +252,18 @@ class TsBlock:
         block_df = block_df.append(insert_row, ignore_index=True)
         return block_df.set_index('start_dt')
 
-    def __block_relation(self, block_df):
+    @staticmethod
+    def __block_relation(block_df):
         block_relation_df = block_df[block_df['segment_num'] > 3].diff()[1:]
-        df = block_df.copy(deep=True)
-        df['block_flag'] = '-'
-        df['block_hl_flag'] = '-'
-        # df['top_bottom_flag'] = '-'
+        temp_df = block_df.copy(deep=True)
+        temp_df['block_flag'] = '-'
+        temp_df['block_hl_flag'] = '-'
+        temp_df['No.'] = '_'
+        # temp_df['No_include_3'] = '_'
+        # temp_df['top_bottom_flag'] = '-'
+
+        block_index = 0
+        # block_index_incl3 = 0
 
         for row in block_relation_df.itertuples():
             current_dt = row.Index
@@ -269,30 +273,36 @@ class TsBlock:
                 block_flag = 'up'
             elif row.block_high < 0 and row.block_low < 0:
                 block_flag = 'down'
-            elif row.block_high > 0 and row.block_low < 0:
+            elif row.block_high > 0 > row.block_low:
                 block_flag = 'include'
-            elif row.block_high < 0 and row.block_low > 0:
+            elif row.block_high < 0 < row.block_low:
                 block_flag = 'included'
 
             if row.block_highest > 0 and row.block_lowest > 0:
                 block_hl_flag = 'up'
             elif row.block_highest < 0 and row.block_lowest < 0:
                 block_hl_flag = 'down'
-            elif row.block_highest > 0 and row.block_lowest < 0:
+            elif row.block_highest > 0 > row.block_lowest:
                 block_hl_flag = 'include'
-            elif row.block_highest < 0 and row.block_lowest > 0:
+            elif row.block_highest < 0 < row.block_lowest:
                 block_hl_flag = 'included'
 
-            df.loc[current_dt, 'block_flag'] = block_flag
-            df.loc[current_dt, 'block_hl_flag'] = block_hl_flag
+            temp_df.loc[current_dt, 'block_flag'] = block_flag
+            temp_df.loc[current_dt, 'block_hl_flag'] = block_hl_flag
 
-            if df.segment_num[current_dt] % 2 == 0:
+            block_index = block_index + 1
+
+            # 最后一个block不能确认是top或者bottom
+            if temp_df.segment_num[current_dt] % 2 == 0:
                 if block_flag == 'up':
-                    df.loc[current_dt, 'block_flag'] = 'top'
+                    temp_df.loc[current_dt, 'block_flag'] = 'top'
                 elif block_flag == 'down':
-                    df.loc[current_dt, 'block_flag'] = 'bottom'
+                    temp_df.loc[current_dt, 'block_flag'] = 'bottom'
+                block_index = 0
 
-        return df
+            temp_df.loc[current_dt, 'No.'] = block_index
+
+        return temp_df
 
 
 if __name__ == "__main__":
@@ -333,9 +343,9 @@ if __name__ == "__main__":
     # print("-----------------")
     # print(extreme[1].tail())
     #
-    # today = datetime.today()
-    # observation = 365
-    # start = today - timedelta(observation)
+    today = datetime.today()
+    observation = 365
+    start = today - timedelta(observation)
     # end = today - timedelta(7)
     #
     # extreme = block.get_extremes(start=start, end=end)
@@ -361,6 +371,4 @@ if __name__ == "__main__":
     block = TsBlock("SRL9")
     segment = block.get_segments()
     df = pd.concat(segment, axis=1, join='outer').fillna(0)
-    # df.tail(50)
-
     block_df = block.get_blocks()
