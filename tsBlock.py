@@ -91,6 +91,7 @@ class TsBlock:
         else:
             higher, lower = self.get_segments(start=start, end=end, freq=freq)
             block = self.__block_identify(higher, lower)
+            block = self.__block_relation(block)
             self.__blocks[freq] = block
             return block
 
@@ -250,7 +251,7 @@ class TsBlock:
         return block_df.set_index('start_dt')
 
     def __block_relation(self, block_df):
-        block_relation_df = block_df[block_df['segment_num'] > 3].diff(-1)[:-1]
+        block_relation_df = block_df[block_df['segment_num'] > 3].diff()[1:]
         df = block_df.copy(deep=True)
         df['block_flag'] = '-'
         df['block_hl_flag'] = '-'
