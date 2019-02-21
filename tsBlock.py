@@ -299,8 +299,8 @@ class TsBlock:
 
             block_index = block_index + 1
 
-            # 最后一个block不能确认是top或者bottom
-            if temp_df.segment_num[current_dt] % 2 == 0 and current_dt != block_relation_df.index[-1]:
+            # 最后一个block不能确认是top或者bottom,segment_num < 4的情况要计算在内
+            if temp_df.segment_num[current_dt] % 2 == 0 and current_dt != block_df.index[-1]:
                 if block_flag == 'up':
                     temp_df.loc[current_dt, 'block_flag'] = 'top'
                 elif block_flag == 'down':
