@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import scipy.signal as signal
 
-FREQ = ('5m', '30m', 'd', 'w')
+FREQ = ('5m', '30m', 'h', 'd', 'w', 'm', 'q')
 
 
 class TsBlock:
@@ -23,6 +23,7 @@ class TsBlock:
         :param freq: ('5m', '30m', 'd', 'w')
         :return: [pd.Series, pd.Series]
         """
+
         extreme = self.__extremes[freq]
 
         if extreme:
@@ -34,12 +35,18 @@ class TsBlock:
                 return [extreme[0][:end], extreme[1][:end]]
             else:
                 return extreme
+        elif freq not in ('5m', 'd'):
+            index = FREQ.index(freq) - 1
+            high, low = self.get_segments(start=start, end=end, freq=FREQ[index])
         else:
             df = self.get_history_hq(start=start, end=end, freq=freq)
-            extreme = self.__extreme(df.high, df.low)
-            self.__extremes[freq] = extreme
+            high = df.high
+            low = df.low
 
-            return extreme
+        extreme = self.__extreme(high, low)
+        self.__extremes[freq] = extreme
+
+        return extreme
 
     def get_segments(self, start=None, end=None, freq='d'):
         """
@@ -94,7 +101,6 @@ class TsBlock:
             else:
                 return block
 
-
     def get_current_status(self, start=None, end=None, freq='d'):
         block_df = self.get_blocks(start=None, end=None, freq=freq)
         dt = block_df.loc[block_df['No.'] == 0, ['block_flag', 'No.', 'segment_num', 'block_hl_flag']].tail(2).index[0]
@@ -109,6 +115,7 @@ class TsBlock:
         :param freq: '5m', '30m', 'd', 'w'
         :return: pd.Dataframe columns=['high', 'low']
         """
+
         from pytdx.reader import TdxExHqDailyBarReader
         reader = TdxExHqDailyBarReader()
         df = reader.get_df(r"D:\Trade\TDX\vipdoc\ds\lday\28#SRL9.day")
@@ -293,7 +300,7 @@ class TsBlock:
             block_index = block_index + 1
 
             # 最后一个block不能确认是top或者bottom
-            if temp_df.segment_num[current_dt] % 2 == 0:
+            if temp_df.segment_num[current_dt] % 2 == 0 and current_dt != block_relation_df.index[-1]:
                 if block_flag == 'up':
                     temp_df.loc[current_dt, 'block_flag'] = 'top'
                 elif block_flag == 'down':
@@ -306,68 +313,15 @@ class TsBlock:
 
 
 if __name__ == "__main__":
-    block = TsBlock("SRL9")
-
-    segment = block.get_segments()
-    print("------init segments-----------")
-    print(segment[0].tail())
-    print("-----------------")
-    print(segment[1].tail())
+    from datetime import datetime, timedelta
+    from tsBlock import TsBlock
+    import pandas as pd
 
     today = datetime.today()
     observation = 365
     start = today - timedelta(observation)
     end = today - timedelta(7)
 
-    segment = block.get_segments(start=start, end=end)
-    print("------get segments from memory-----------")
-    print(segment[0].tail())
-    print("-----------------")
-    print(segment[1].tail())
-
-    segment = block.get_segments(end=end)
-    print("------get segments from memory-----------")
-    print(segment[0].tail())
-    print("-----------------")
-    print(segment[1].tail())
-
-    segment = block.get_segments(start=today - timedelta(60))
-    print("------get segments from memory-----------")
-    print(segment[0].head())
-    print("-----------------")
-    print(segment[1].head())
-
-    # extreme = block.get_extremes()
-    # print("------init extreme-----------")
-    # print(extreme[0].tail())
-    # print("-----------------")
-    # print(extreme[1].tail())
-    #
-    today = datetime.today()
-    observation = 365
-    start = today - timedelta(observation)
-    # end = today - timedelta(7)
-    #
-    # extreme = block.get_extremes(start=start, end=end)
-    # print("------get extreme from memory-----------")
-    # print(extreme[0].tail())
-    # print("-----------------")
-    # print(extreme[1].tail())
-    #
-    # extreme = block.get_extremes(end=end)
-    # print("------get extreme from memory-----------")
-    # print(extreme[0].tail())
-    # print("-----------------")
-    # print(extreme[1].tail())
-    #
-    # extreme = block.get_extremes(start=today - timedelta(60))
-    # print("------get extreme from memory-----------")
-    # print(extreme[0].head())
-    # print("-----------------")
-    # print(extreme[1].head())
-
-    from tsBlock import TsBlock
-    import pandas as pd
     block = TsBlock("SRL9")
     segment = block.get_segments()
     df = pd.concat(segment, axis=1, join='outer').fillna(0)
